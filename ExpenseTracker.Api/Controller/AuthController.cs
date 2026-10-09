@@ -1,46 +1,54 @@
-﻿using ExpenseTracker.Application.Common.Interfaces;
+﻿using System.IdentityModel.Tokens.Jwt;
 using ExpenseTracker.Application.Features.Auth;
-using ExpenseTracker.Domain.Entities;
-using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
-namespace ExpenseTracker.Api.Controller
+namespace ExpenseTracker.Api.Controllers;
+
+[ApiController]
+[Route("api/[controller]")]
+public class AuthController : ControllerBase
 {
-    [Route("api/[controller]")]
-    [ApiController]
-    public class AuthController : ControllerBase
+    private readonly IAuthService _authService;
+
+    public AuthController(IAuthService authService)
     {
-        private readonly IUserRepository _userRepository;
-        private readonly PasswordHasher<User> _passwordHasher = new();
+        _authService = authService;
+    }
 
-        public AuthController(IUserRepository userRepository)
-        {
-            _userRepository = userRepository;
-        }
+    [HttpPost("register")]
+    public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+            return BadRequest("Email and password are required.");
 
-        [HttpPost("register")]
-        public async Task<ActionResult<AuthResponse>> Register(RegisterRequest request)
-        {
-            if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
-                return BadRequest("Email and password are required.");
+        var result = await _authService.RegisterAsync(request);
 
-            if (await _userRepository.ExistsByEmailAsync(request.Email))
-                return Conflict("An account with this email already exists.");
+        return result is null
+            ? Conflict("An account with this email already exists.")
+            : Ok(result);
+    }
 
-            var user = new User
-            {
-                Email = request.Email
-            };
-            user.PasswordHash = _passwordHasher.HashPassword(user, request.Password);
+    [HttpPost("login")]
+    public async Task<ActionResult<LoginResponse>> Login(LoginRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Email) || string.IsNullOrWhiteSpace(request.Password))
+            return BadRequest("Email and password are required.");
 
-            await _userRepository.AddAsync(user);
+        var result = await _authService.LoginAsync(request);
 
-            return Ok(new AuthResponse
-            {
-                UserId = user.Id,
-                Email = user.Email
-            });
-        }
+        return result is null
+            ? Unauthorized("Invalid email or password.")
+            : Ok(result);
+    }
+
+    // Temporary protected endpoint to prove the JWT flow works (remove later)
+    [Authorize]
+    [HttpGet("me")]
+    public ActionResult<object> Me()
+    {
+        var userId = User.FindFirst(JwtRegisteredClaimNames.Sub)?.Value;
+        var email = User.FindFirst(JwtRegisteredClaimNames.Email)?.Value;
+        return Ok(new { userId, email });
     }
 }
